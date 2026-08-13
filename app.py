@@ -9,35 +9,53 @@ st.set_page_config(
     layout="wide"
 )
 
-# --- 정밀 분석 엔진 (V8: 중복 합산 방지 및 정확도 개선) ---
+# --- 정밀 분석 엔진 (V9: 합계 행 중복 합산 방지 및 자동 범위 감지) ---
 def parse_elective_credit(val, is_science_track=False):
     """
     xx(택n) 또는 kk~ll(택n) 패턴에서 학점 추출
     """
     s_val = re.sub(r'\s+', '', str(val))
-    # kk~ll(택n) 패턴 처리
     if '택' in s_val and '~' in s_val:
         match = re.search(r'(\d+)~(\d+)', s_val)
         if match:
             kk, ll = int(match.group(1)), int(match.group(2))
             return ll if is_science_track else kk
-    # xx(택n) 패턴 처리
     if '택' in s_val:
         match = re.match(r'^(\d+)', s_val)
         if match: return int(match.group(1))
-    # 일반 숫자 처리
     match = re.search(r'(\d+)', s_val)
     if match: return int(match.group(1))
     return 0
 
 def analyze_curriculum_data(df, is_science_track=False, is_combined_sheet=False):
     """
-    교과군별 최대 이수 학점 및 학기별 총 이수 학점 산출
+    합계 행을 자동으로 감지하여 제외하고 순수 과목 데이터만 분석
     """
-    # 과목 영역 (7행 ~ 117행)
-    raw_data = df.iloc[6:117].copy()
-    raw_data.columns = range(df.shape[1])
-    raw_data[0] = raw_data[0].ffill() # 구분 (학교지정/학년선택)
+    # 1. 과목 데이터 영역 자동 감지
+    all_data = df.iloc[6:].copy()
+    all_data.columns = range(df.shape[1])
+    
+    subject_rows = []
+    creative_row = None
+    
+    for idx, row in all_data.iterrows():
+        row_str = " ".join([str(v) for v in row.values])
+        # 합계, 소계, 총계 행이 나오면 과목 영역 종료
+        if any(k in row_str for k in ['소계', '합계', '총계']):
+            continue
+        # 창의적 체험활동 행은 별도로 보관
+        if '창의적' in row_str:
+            creative_row = row
+            continue
+        # 과목명이 있고 학점이 적혀 있는 행을 과목 행으로 간주
+        if pd.notna(row[3]) and (pd.notna(row[5]) or any(pd.notna(row[c]) for c in range(6, 12))):
+            subject_rows.append(row)
+            
+    if not subject_rows:
+        return {}, [0]*6
+        
+    raw_data = pd.DataFrame(subject_rows)
+    raw_data[0] = raw_data[0].ffill() # 구분
     raw_data[1] = raw_data[1].ffill() # 교과(군)
     
     # 통합 시트일 경우 일반 학생 데이터에서 '과중 - 지정' 행 제외
@@ -52,8 +70,8 @@ def analyze_curriculum_data(df, is_science_track=False, is_combined_sheet=False)
     
     group_max = {k: 0 for k in target_groups.keys()}
     
-    # --- 1. 교과군별 최대 이수 가능 학점 계산 (중복 방지 로직) ---
-    # 선택 블록별로 각 교과군이 기여하는 최대 학점을 계산
+    # --- 교과군별 최대 이수 가능 학점 계산 ---
+    # 블록 식별
     raw_data['block'] = 0
     block_id, last_cat = 0, ""
     for idx, row in raw_data.iterrows():
@@ -63,7 +81,7 @@ def analyze_curriculum_data(df, is_science_track=False, is_combined_sheet=False)
             last_cat = cat
         raw_data.at[idx, 'block'] = block_id
 
-    # 학교 지정 과목 합산
+    # 지정 과목 합산
     fixed_subjects = raw_data[~raw_data[0].astype(str).str.contains('선택', na=False)]
     for idx, row in fixed_subjects.iterrows():
         group_val = str(row[1]).strip()
@@ -73,41 +91,28 @@ def analyze_curriculum_data(df, is_science_track=False, is_combined_sheet=False)
                 matched_key = key
                 break
         if matched_key:
-            # 학기 열에 값이 있는 경우만 합산
-            if any(str(row[c]).strip() != 'nan' and str(row[c]).strip() != '' for c in range(6, 12)):
-                credit = pd.to_numeric(row[5], errors='coerce')
-                if not pd.isna(credit): group_max[matched_key] += credit
+            credit = pd.to_numeric(row[5], errors='coerce')
+            if not pd.isna(credit): group_max[matched_key] += credit
 
-    # 학년 선택 블록 내 최대 학점 합산
+    # 선택 블록 합산
     for b in range(1, block_id + 1):
         block_rows = raw_data[raw_data['block'] == b]
         for key, aliases in target_groups.items():
-            # 해당 블록 내에서 특정 교과군에 속하는 과목들의 운영학점 합산
             group_rows = block_rows[block_rows[1].astype(str).apply(lambda x: any(a == x.strip() for a in aliases))]
             if not group_rows.empty:
-                # 해당 블록이 어느 학기에 배당되었는지 확인 (택n 표기 확인)
-                has_elective = False
-                for c in range(6, 12):
-                    if any('택' in str(val) for val in block_rows[c]):
-                        has_elective = True
-                        break
-                if has_elective:
-                    # 블록 내 해당 교과군 과목들의 운영학점 합계
-                    block_group_sum = pd.to_numeric(group_rows[5], errors='coerce').sum()
-                    group_max[key] += block_group_sum
+                block_group_sum = pd.to_numeric(group_rows[5], errors='coerce').sum()
+                group_max[key] += block_group_sum
 
-    # --- 2. 학기별 총 이수 학점 계산 (창체 포함) ---
+    # --- 학기별 총 이수 학점 계산 (창체 포함) ---
     sem_totals = [0] * 6
-    creative_data = df.iloc[118:119].copy()
-    creative_data.columns = range(df.shape[1])
-    # 과목 영역 + 창체 행
-    full_data = pd.concat([raw_data, creative_data])
+    # 과목 데이터 + 창체 데이터
+    calc_data = subject_rows + ([creative_row] if creative_row is not None else [])
     
     for c in range(6, 12):
         col_sum = 0
-        for val in full_data[c]:
-            s_val = str(val).strip()
-            if s_val == 'nan' or not s_val or '[' in s_val:
+        for row in calc_data:
+            val = row[c]
+            if pd.isna(val) or '[' in str(val):
                 continue
             col_sum += parse_elective_credit(val, is_science_track)
         sem_totals[c-6] = col_sum
@@ -124,12 +129,11 @@ def check_file_and_sheets(file):
     return xls, sheet_names, is_science_school, combined, science, general
 
 # --- Streamlit UI ---
-st.title("📚 고등학교 교육과정 편성 자율 점검 시스템 (v2.1)")
+st.title("📚 고등학교 교육과정 편성 자율 점검 시스템 (v2.2)")
 st.sidebar.header("📁 교육과정 파일 업로드")
 uploaded_files = st.sidebar.file_uploader("3개년도 엑셀 파일을 업로드하세요.", type=["xlsx"], accept_multiple_files=True)
 
 if uploaded_files:
-    # 학교별 그룹화
     schools = {}
     for file in uploaded_files:
         filename = file.name
@@ -166,14 +170,7 @@ if uploaded_files:
     for t_idx, school_name in enumerate(schools.keys()):
         with school_tabs[t_idx]:
             school_files = sorted(schools[school_name], key=lambda x: x['year'])
-            
-            # 메인 점검표 구성
-            master_df = pd.DataFrame({
-                "번호": range(1, len(checklist_base) + 1),
-                "점검내용": checklist_base
-            })
-            
-            # 교과군별 학점 테이블 구성을 위한 리스트
+            master_df = pd.DataFrame({"번호": range(1, len(checklist_base) + 1), "점검내용": checklist_base})
             group_credits_data = []
 
             for f_data in school_files:
@@ -191,7 +188,8 @@ if uploaded_files:
                     targets.append(("-일반", df_g, False, False, general[0]))
                     targets.append(("-과중", df_s, True, False, science[0]))
                 else:
-                    s_name = sheet_names[1] if len(sheet_names) > 1 else sheet_names[0]
+                    s_name = [s for s in sheet_names if str(f_data['year']) in s and '입학생' in s]
+                    s_name = s_name[0] if s_name else (sheet_names[1] if len(sheet_names) > 1 else sheet_names[0])
                     df_s = pd.read_excel(f_data['file'], sheet_name=s_name, header=None)
                     if is_sc_school:
                         targets.append(("-일반", df_s, False, False, s_name))
@@ -204,12 +202,11 @@ if uploaded_files:
                     g_max, sems = analyze_curriculum_data(df_target, is_science_track=is_sc, is_combined_sheet=is_comb)
                     
                     total_c = sum(sems)
-                    sem_diff = max(sems) - min(sems)
-                    ksy_c = g_max['국어'] + g_max['수학'] + g_max['영어']
+                    sem_diff = max(sems) - min(sems) if sems else 0
+                    ksy_c = g_max.get('국어', 0) + g_max.get('수학', 0) + g_max.get('영어', 0)
                     ksy_ratio = (ksy_c / 174) * 100 if total_c > 0 else 0
                     
-                    s_year = re.search(r'(\d{4})', s_name)
-                    year_ok = str(f_data['year']) == s_year.group(1) if s_year else False
+                    year_ok = str(f_data['year']) in s_name
                     
                     results = [
                         f"준수({total_c}학점)" if total_c >= 192 else f"점검필요({total_c}학점 미달)",
@@ -219,17 +216,14 @@ if uploaded_files:
                         "준수", "준수", "준수", "준수", "준수",
                         f"준수({ksy_ratio:.1f}%)" if ksy_ratio <= 50 else f"점검필요({ksy_ratio:.1f}% 초과)",
                         "준수",
-                        f"준수({g_max['체육']}학점)" if g_max['체육'] >= 10 else "점검필요(체육학점 부족)",
+                        f"준수({g_max.get('체육', 0)}학점)" if g_max.get('체육', 0) >= 10 else "점검필요(체육학점 부족)",
                         "준수", "준수", "준수", "준수",
                         "준수" if year_ok else "점검필요(연도 불일치)"
                     ]
                     master_df[col_name] = results
-                    
-                    # 교과군별 학점 데이터 저장
                     g_max['구분'] = col_name
                     group_credits_data.append(g_max)
 
-            # --- 결과 출력 ---
             st.subheader(f"📋 {school_name} 교육과정 편성 자율 점검표")
             def style_results(val):
                 return 'background-color: #ffcc99; color: black;' if isinstance(val, str) and "점검필요" in val else ''
@@ -237,10 +231,10 @@ if uploaded_files:
             
             st.markdown("---")
             st.subheader(f"📊 {school_name} 교과(군)별 최대 이수 가능 학점 상세")
-            group_df = pd.DataFrame(group_credits_data)
-            # '구분' 열을 맨 앞으로
-            cols = ['구분'] + [c for c in group_df.columns if c != '구분']
-            st.dataframe(group_df[cols], use_container_width=True, hide_index=True)
+            if group_credits_data:
+                group_df = pd.DataFrame(group_credits_data)
+                cols = ['구분'] + [c for c in group_df.columns if c != '구분']
+                st.dataframe(group_df[cols], use_container_width=True, hide_index=True)
 
 else:
     st.info("👈 사이드바에서 학교별 3개년도 교육과정 엑셀 파일들을 업로드해주세요.")
