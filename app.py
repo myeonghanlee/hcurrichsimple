@@ -10,7 +10,7 @@ st.set_page_config(
     layout="wide"
 )
 
-# --- 고시 과목 데이터 정의 (과목명 일치 여부 점검용) ---
+# --- 고시 과목 데이터 정의 ---
 OFFICIAL_SUBJECTS = {
     "국어": ["공통국어1", "공통국어2", "화법과 언어", "독서와 작문", "문학", "주제 탐구 독서", "문학과 영상", "직무 의사소통", "독서 토론과 글쓰기", "매체 의사소통", "언어생활 탐구"],
     "수학": ["공통수학1", "공통수학2", "기본수학1", "기본수학2", "대수", "미적분Ⅰ", "확률과 통계", "기하", "미적분Ⅱ", "경제 수학", "인공지능 수학", "직무 수학", "수학과 문화", "실용 통계", "수학과제 탐구"],
@@ -23,7 +23,7 @@ OFFICIAL_SUBJECTS = {
 }
 ALL_OFFICIAL_NAMES = [sub for list in OFFICIAL_SUBJECTS.values() for sub in list]
 
-# --- 정밀 분석 엔진 (V10) ---
+# --- 정밀 분석 엔진 ---
 def parse_elective_credit(val, is_science_track=False):
     s_val = re.sub(r'\s+', '', str(val))
     if '택' in s_val and '~' in s_val:
@@ -41,10 +41,7 @@ def parse_elective_credit(val, is_science_track=False):
 def analyze_curriculum_data(df, is_science_track=False, is_combined_sheet=False):
     all_data = df.iloc[6:].copy()
     all_data.columns = range(df.shape[1])
-    
-    subject_rows = []
-    creative_row = None
-    invalid_subjects = []
+    subject_rows, creative_row, invalid_subjects = [], None, []
     
     for idx, row in all_data.iterrows():
         row_str = " ".join([str(v) for v in row.values])
@@ -52,20 +49,16 @@ def analyze_curriculum_data(df, is_science_track=False, is_combined_sheet=False)
         if '창의적' in row_str:
             creative_row = row
             continue
-        
         if pd.notna(row[3]) and (pd.notna(row[5]) or any(pd.notna(row[c]) for c in range(6, 12))):
             subject_rows.append(row)
-            # 과목명 점검
             name = str(row[3]).strip()
             if name and name not in ALL_OFFICIAL_NAMES and '창의적' not in name:
                 invalid_subjects.append({"과목명": name, "행번호": idx+1, "사유": "고시 명칭 불일치"})
 
     if not subject_rows: return {}, [0]*6, []
-        
     raw_data = pd.DataFrame(subject_rows)
     raw_data[0] = raw_data[0].ffill()
     raw_data[1] = raw_data[1].ffill()
-    
     if is_combined_sheet and not is_science_track:
         raw_data = raw_data[~raw_data[12].astype(str).str.contains('과중 - 지정', na=False)]
 
@@ -74,7 +67,6 @@ def analyze_curriculum_data(df, is_science_track=False, is_combined_sheet=False)
         '사회': ['사 회\n(역사/도덕 포함)', '사회'], '과학': ['과 학'],
         '체육': ['체 육'], '기가/정보': ['기술∙가정/정보', '기술·가정/정보'], '교양': ['교 양']
     }
-    
     group_max = {k: 0 for k in target_groups.keys()}
     raw_data['block'] = 0
     block_id, last_cat = 0, ""
@@ -114,7 +106,6 @@ def analyze_curriculum_data(df, is_science_track=False, is_combined_sheet=False)
             if pd.isna(val) or '[' in str(val): continue
             col_sum += parse_elective_credit(val, is_science_track)
         sem_totals[c-6] = col_sum
-
     return group_max, sem_totals, invalid_subjects
 
 def check_file_and_sheets(file):
@@ -127,7 +118,7 @@ def check_file_and_sheets(file):
     return xls, sheet_names, is_science_school, combined, science, general
 
 # --- Streamlit UI ---
-st.title("📚 고등학교 교육과정 편성 자율 점검 시스템 (v2.3)")
+st.title("📚 고등학교 교육과정 편성 자율 점검 시스템 (v2.5 by mhlee)")
 st.sidebar.header("📁 교육과정 파일 업로드")
 uploaded_files = st.sidebar.file_uploader("3개년도 엑셀 파일을 업로드하세요.", type=["xlsx"], accept_multiple_files=True)
 
@@ -141,9 +132,7 @@ if uploaded_files:
         if school_name not in schools: schools[school_name] = []
         schools[school_name].append({"file": file, "year": year, "name": filename})
 
-    # 전체 학교 결과를 담을 딕셔너리 (엑셀 다운로드용)
     all_school_results = {}
-
     school_tabs = st.tabs([f"🏫 {s}" for s in schools.keys()])
     
     checklist_base = [
@@ -172,13 +161,11 @@ if uploaded_files:
         with school_tabs[t_idx]:
             school_files = sorted(schools[school_name], key=lambda x: x['year'])
             master_df = pd.DataFrame({"번호": range(1, len(checklist_base) + 1), "점검내용": checklist_base})
-            group_credits_data = []
-            all_invalid_subjects = []
+            group_credits_data, all_invalid_subjects = [], []
 
             for f_data in school_files:
                 xls, sheet_names, is_sc_school, combined, science, general = check_file_and_sheets(f_data['file'])
                 year_label = f"{f_data['year']}년 입학생"
-                
                 targets = []
                 if combined:
                     df_comb = pd.read_excel(f_data['file'], sheet_name=combined[0], header=None)
@@ -202,7 +189,6 @@ if uploaded_files:
                 for suffix, df_target, is_sc, is_comb, s_name in targets:
                     col_name = f"{year_label}{suffix}"
                     g_max, sems, invalid_subs = analyze_curriculum_data(df_target, is_science_track=is_sc, is_combined_sheet=is_comb)
-                    
                     total_c = sum(sems)
                     sem_diff = max(sems) - min(sems) if sems else 0
                     ksy_c = g_max.get('국어', 0) + g_max.get('수학', 0) + g_max.get('영어', 0)
@@ -228,7 +214,6 @@ if uploaded_files:
                         sub['구분'] = col_name
                         all_invalid_subjects.append(sub)
 
-            # --- 결과 출력 ---
             st.subheader(f"📋 {school_name} 교육과정 편성 자율 점검표")
             def style_results(val):
                 return 'background-color: #ffcc99; color: black;' if isinstance(val, str) and "점검필요" in val else ''
@@ -242,45 +227,90 @@ if uploaded_files:
 
             st.markdown("---")
             st.subheader(f"⚠️ {school_name} 점검 필요 과목 리스트")
-            if all_invalid_subjects:
-                invalid_df = pd.DataFrame(all_invalid_subjects)
-                st.dataframe(invalid_df[['구분', '행번호', '과목명', '사유']], use_container_width=True, hide_index=True)
-            else:
-                st.success("고시 명칭과 일치하지 않는 과목이 없습니다.")
+            invalid_df = pd.DataFrame(all_invalid_subjects) if all_invalid_subjects else pd.DataFrame(columns=['구분', '행번호', '과목명', '사유'])
+            st.dataframe(invalid_df, use_container_width=True, hide_index=True)
             
-            # 엑셀 다운로드용 데이터 저장
-            all_school_results[school_name] = {
-                "점검표": master_df,
-                "교과군상세": group_df[cols],
-                "점검필요과목": pd.DataFrame(all_invalid_subjects) if all_invalid_subjects else pd.DataFrame(columns=['구분', '행번호', '과목명', '사유'])
-            }
+            all_school_results[school_name] = {"점검표": master_df, "교과군상세": group_df[cols], "점검필요과목": invalid_df}
 
-    # --- 전체 결과 엑셀 다운로드 ---
+    # --- 전체 결과 엑셀 다운로드 (디자인 및 셀 병합 적용) ---
     st.sidebar.markdown("---")
     st.sidebar.subheader("📥 결과 다운로드")
     
     output = io.BytesIO()
     with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
+        workbook = writer.book
+        
+        # 스타일 정의
+        title_fmt = workbook.add_format({'bold': True, 'size': 16, 'align': 'center', 'valign': 'vcenter', 'bg_color': '#D9EAD3', 'border': 1})
+        header_fmt = workbook.add_format({'bold': True, 'bg_color': '#F3F3F3', 'border': 1, 'align': 'center', 'valign': 'vcenter'})
+        cell_fmt = workbook.add_format({'border': 1, 'valign': 'vcenter'})
+        center_fmt = workbook.add_format({'border': 1, 'align': 'center', 'valign': 'vcenter'})
+        warn_fmt = workbook.add_format({'border': 1, 'bg_color': '#FFCC99', 'valign': 'vcenter'})
+        sub_title_fmt = workbook.add_format({'bold': True, 'bg_color': '#EFEFEF', 'border': 1, 'align': 'left'})
+
         for school_name, results in all_school_results.items():
-            # 학교별 시트 생성 (점검표, 상세, 과목리스트 통합)
-            # 시트 이름 제한(31자) 고려
             sheet_name = school_name[:31]
+            worksheet = workbook.add_worksheet(sheet_name)
             
-            # 한 시트에 여러 테이블 작성
-            results["점검표"].to_excel(writer, sheet_name=sheet_name, index=False, startrow=0)
+            # 1. 제목 (셀 병합)
+            num_cols = len(results["점검표"].columns)
+            worksheet.merge_range(0, 0, 1, num_cols - 1, f"[{school_name}] 고등학교 교육과정 편성 자율 점검 결과 보고서", title_fmt)
             
-            start_row_group = len(results["점검표"]) + 3
-            pd.Series([f"[{school_name}] 교과군별 최대 학점 상세"]).to_excel(writer, sheet_name=sheet_name, index=False, header=False, startrow=start_row_group-1)
-            results["교과군상세"].to_excel(writer, sheet_name=sheet_name, index=False, startrow=start_row_group)
+            # 2. 점검표 작성
+            start_row = 3
+            # 헤더
+            for col_num, value in enumerate(results["점검표"].columns.values):
+                worksheet.write(start_row, col_num, value, header_fmt)
+            # 데이터
+            for row_num, row_data in enumerate(results["점검표"].values):
+                for col_num, value in enumerate(row_data):
+                    fmt = center_fmt if col_num == 0 else cell_fmt
+                    if isinstance(value, str) and "점검필요" in value:
+                        fmt = warn_fmt
+                    worksheet.write(start_row + 1 + row_num, col_num, value, fmt)
             
-            start_row_invalid = start_row_group + len(results["교과군상세"]) + 3
-            pd.Series([f"[{school_name}] 점검 필요 과목 리스트"]).to_excel(writer, sheet_name=sheet_name, index=False, header=False, startrow=start_row_invalid-1)
-            results["점검필요과목"].to_excel(writer, sheet_name=sheet_name, index=False, startrow=start_row_invalid)
+            # 3. 교과군별 상세 작성
+            start_row_group = start_row + len(results["점검표"]) + 4
+            worksheet.merge_range(start_row_group - 1, 0, start_row_group - 1, len(results["교과군상세"].columns) - 1, "📊 교과(군)별 최대 이수 가능 학점 상세", sub_title_fmt)
+            # 헤더
+            for col_num, value in enumerate(results["교과군상세"].columns.values):
+                worksheet.write(start_row_group, col_num, value, header_fmt)
+            # 데이터
+            for row_num, row_data in enumerate(results["교과군상세"].values):
+                for col_num, value in enumerate(row_data):
+                    worksheet.write(start_row_group + 1 + row_num, col_num, value, center_fmt)
+
+            # 4. 점검 필요 과목 리스트 작성
+            start_row_invalid = start_row_group + len(results["교과군상세"]) + 4
+            worksheet.merge_range(start_row_invalid - 1, 0, start_row_invalid - 1, 3, "⚠️ 점검 필요 과목 리스트 (고시 명칭 불일치 등)", sub_title_fmt)
+            # 헤더
+            for col_num, value in enumerate(results["점검필요과목"].columns.values):
+                worksheet.write(start_row_invalid, col_num, value, header_fmt)
+            # 데이터
+            if not results["점검필요과목"].empty:
+                for row_num, row_data in enumerate(results["점검필요과목"].values):
+                    for col_num, value in enumerate(row_data):
+                        worksheet.write(start_row_invalid + 1 + row_num, col_num, value, cell_fmt)
+            else:
+                worksheet.write(start_row_invalid + 1, 0, "특이사항 없음", cell_fmt)
+
+            # --- 열 너비 자동 조절 (CJK 문자 고려) ---
+            def get_excel_width(s):
+                return sum(2 if ord(c) > 128 else 1 for c in str(s))
+            col_widths = {}
+            dfs_to_check = [results["점검표"], results["교과군상세"], results["점검필요과목"]]
+            for df in dfs_to_check:
+                for i, col in enumerate(df.columns):
+                    header_width = get_excel_width(col)
+                    data_width = df[col].astype(str).map(get_excel_width).max() if not df.empty else 0
+                    col_widths[i] = max(col_widths.get(i, 0), max(header_width, data_width))
+            for i, width in col_widths.items():
+                worksheet.set_column(i, i, width + 3)
             
     st.sidebar.download_button(
-        label="📊 전체 결과 엑셀 다운로드",
+        label="🎨 디자인 적용 엑셀 다운로드",
         data=output.getvalue(),
-        file_name="고등학교_교육과정_점검결과_통합.xlsx",
+        file_name="고등학교_교육과정_점검결과_디자인.xlsx",
         mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
     )
 
