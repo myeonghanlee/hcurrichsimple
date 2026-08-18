@@ -23,7 +23,7 @@ OFFICIAL_SUBJECTS = {
 }
 ALL_OFFICIAL_NAMES = [sub for list in OFFICIAL_SUBJECTS.values() for sub in list]
 
-# --- 정밀 분석 엔진 (V11: 운영 학점 일치 여부 검증 추가) ---
+# --- 정밀 분석 엔진 ---
 def parse_elective_credit(val, is_science_track=False):
     s_val = re.sub(r'\s+', '', str(val))
     if '택' in s_val and '~' in s_val:
@@ -55,11 +55,9 @@ def analyze_curriculum_data(df, is_science_track=False, is_combined_sheet=False)
             name = str(row[3]).strip()
             op_credit = pd.to_numeric(row[5], errors='coerce')
             
-            # 1. 고시 명칭 점검
             if name and name not in ALL_OFFICIAL_NAMES and '창의적' not in name:
                 invalid_subjects.append({"과목명": name, "행번호": idx+1, "사유": "고시 명칭 불일치"})
             
-            # 2. 운영 학점 vs 학기 배당 학점 일치 여부 점검 (신규)
             if not pd.isna(op_credit):
                 sem_sum = 0
                 for c in range(6, 12):
@@ -137,7 +135,7 @@ def check_file_and_sheets(file):
     return xls, sheet_names, is_science_school, combined, science, general
 
 # --- Streamlit UI ---
-st.title("📚 고등학교 교육과정 편성 자율 점검 시스템 (v2.6)")
+st.title("📚 고등학교 교육과정 편성 자율 점검 시스템 (v2.6.1)")
 st.sidebar.header("📁 교육과정 파일 업로드")
 uploaded_files = st.sidebar.file_uploader("3개년도 엑셀 파일을 업로드하세요.", type=["xlsx"], accept_multiple_files=True)
 
@@ -209,12 +207,15 @@ if uploaded_files:
                 for suffix, df_target, is_sc, is_comb, s_name in targets:
                     col_name = f"{year_label}{suffix}"
                     g_max, sems, invalid_subs = analyze_curriculum_data(df_target, is_science_track=is_sc, is_combined_sheet=is_comb)
+                    
                     total_c = sum(sems)
                     sem_diff = max(sems) - min(sems) if sems else 0
                     ksy_c = g_max.get('국어', 0) + g_max.get('수학', 0) + g_max.get('영어', 0)
                     ksy_ratio = (ksy_c / 174) * 100 if total_c > 0 else 0
                     year_ok = str(f_data['year']) in s_name
-                    credit_consistency = not any("학점 불일치" in sub['사유'] for sub in invalid_subs if sub['구분'] == col_name)
+                    
+                    # KeyError 해결: invalid_subs에서 직접 체크
+                    credit_consistency = not any("학점 불일치" in sub['사유'] for sub in invalid_subs)
                     
                     results = [
                         f"준수({total_c}학점)" if total_c >= 192 else f"점검필요({total_c}학점 미달)",
