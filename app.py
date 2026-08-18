@@ -21,7 +21,8 @@ OFFICIAL_SUBJECTS = {
     "예술": ["음악", "미술", "연극", "음악 연주와 창작", "음악 감상과 비평", "미술 창작", "미술 감상과 비평", "음악과 미디어", "미술과 매체"],
     "기술∙가정/정보": ["기술∙가정", "정보", "로봇과 공학세계", "생활과학 탐구", "창의 공학 설계", "지식 재산 일반", "생애 설계와 자립", "아동발달과 부모", "인공지능 기초", "데이터 과학", "소프트웨어와 생활"]
 }
-ALL_OFFICIAL_NAMES = [sub for list in OFFICIAL_SUBJECTS.values() for sub in list]
+# 과목명 비교 시 빈칸 무시를 위해 모든 공백 제거된 세트 생성
+ALL_OFFICIAL_NAMES_CLEAN = {re.sub(r'\s+', '', sub) for list in OFFICIAL_SUBJECTS.values() for sub in list}
 
 # --- 정밀 분석 엔진 ---
 def parse_elective_credit(val, is_science_track=False):
@@ -53,24 +54,44 @@ def analyze_curriculum_data(df, is_science_track=False, is_combined_sheet=False)
         if pd.notna(row[3]) and (pd.notna(row[5]) or any(pd.notna(row[c]) for c in range(6, 12))):
             subject_rows.append(row)
             name = str(row[3]).strip()
+            # 과목명 빈칸 무시 검증 (공백 제거 후 비교)
+            name_clean = re.sub(r'\s+', '', name)
             op_credit = pd.to_numeric(row[5], errors='coerce')
             
-            if name and name not in ALL_OFFICIAL_NAMES and '창의적' not in name:
+            # 1. 고시 명칭 점검
+            if name_clean and name_clean not in ALL_OFFICIAL_NAMES_CLEAN and '창의적' not in name:
                 invalid_subjects.append({"과목명": name, "행번호": idx+1, "사유": "고시 명칭 불일치"})
             
+            # 2. 학점 일치 여부 점검 (학교지정 vs 학년선택 구분)
             if not pd.isna(op_credit):
+                is_elective = "선택" in str(row[0])
                 sem_sum = 0
+                sem_credits = []
                 for c in range(6, 12):
                     val = str(row[c]).strip()
                     if val == 'nan' or not val or '[' in val: continue
-                    sem_sum += parse_elective_credit(val, is_science_track)
+                    credit = parse_elective_credit(val, is_science_track)
+                    sem_sum += credit
+                    if credit > 0: sem_credits.append(credit)
                 
-                if op_credit != sem_sum and sem_sum > 0:
-                    invalid_subjects.append({
-                        "과목명": name, 
-                        "행번호": idx+1, 
-                        "사유": f"학점 불일치(운영:{int(op_credit)} / 배당합:{int(sem_sum)})"
-                    })
+                if is_elective:
+                    # 학년 선택: 운영학점이 배당학점의 배수인지 확인
+                    if sem_credits:
+                        # 모든 배당학점에 대해 운영학점이 배수인지 체크
+                        if not all(op_credit % sc == 0 for sc in sem_credits):
+                            invalid_subjects.append({
+                                "과목명": name, 
+                                "행번호": idx+1, 
+                                "사유": f"학점 배수 불일치(운영:{int(op_credit)} / 배당:{sem_credits})"
+                            })
+                else:
+                    # 학교 지정: 합계가 운영학점과 일치해야 함
+                    if op_credit != sem_sum and sem_sum > 0:
+                        invalid_subjects.append({
+                            "과목명": name, 
+                            "행번호": idx+1, 
+                            "사유": f"학점 합계 불일치(운영:{int(op_credit)} / 합계:{int(sem_sum)})"
+                        })
 
     if not subject_rows: return {}, [0]*6, []
     raw_data = pd.DataFrame(subject_rows)
@@ -135,15 +156,13 @@ def check_file_and_sheets(file):
     return xls, sheet_names, is_science_school, combined, science, general
 
 # --- Streamlit UI ---
-st.title("📚 고등학교 교육과정 편성 자율 점검 시스템 (v2.7)")
+st.title("📚 고등학교 교육과정 편성 자율 점검 시스템 (v2.8)")
 
-# 초기화 세션 상태 관리
 if 'uploader_key' not in st.session_state:
     st.session_state.uploader_key = 0
 
 st.sidebar.header("📁 교육과정 파일 업로드")
 
-# 일괄 초기화 버튼
 if st.sidebar.button("🧹 파일 일괄 초기화"):
     st.session_state.uploader_key += 1
     st.rerun()
