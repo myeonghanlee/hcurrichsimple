@@ -21,7 +21,7 @@ OFFICIAL_SUBJECTS = {
     "예술": ["음악", "미술", "연극", "음악 연주와 창작", "음악 감상과 비평", "미술 창작", "미술 감상과 비평", "음악과 미디어", "미술과 매체"],
     "기술∙가정/정보": ["기술∙가정", "정보", "로봇과 공학세계", "생활과학 탐구", "창의 공학 설계", "지식 재산 일반", "생애 설계와 자립", "아동발달과 부모", "인공지능 기초", "데이터 과학", "소프트웨어와 생활"]
 }
-# 과목명 비교 시 빈칸 무시를 위해 모든 공백 제거된 세트 생성
+# 과목명 비교 시 빈칸(띄어쓰기, 끝 공백 등) 무시를 위해 모든 공백 제거된 세트 생성
 ALL_OFFICIAL_NAMES_CLEAN = {re.sub(r'\s+', '', sub) for list in OFFICIAL_SUBJECTS.values() for sub in list}
 
 # --- 정밀 분석 엔진 ---
@@ -53,17 +53,17 @@ def analyze_curriculum_data(df, is_science_track=False, is_combined_sheet=False)
         
         if pd.notna(row[3]) and (pd.notna(row[5]) or any(pd.notna(row[c]) for c in range(6, 12))):
             subject_rows.append(row)
-            name = str(row[3]).strip()
-            # 과목명 빈칸 무시 검증 (공백 제거 후 비교)
+            name = str(row[3]) # 원본 유지
+            # 과목명 빈칸(끝 공백 포함) 무시 검증: 모든 공백 제거 후 비교
             name_clean = re.sub(r'\s+', '', name)
             op_credit = pd.to_numeric(row[5], errors='coerce')
             
-            # 1. 고시 명칭 점검
+            # 1. 고시 명칭 점검 (빈칸 무시)
             if name_clean and name_clean not in ALL_OFFICIAL_NAMES_CLEAN and '창의적' not in name:
                 invalid_subjects.append({"과목명": name, "행번호": idx+1, "사유": "고시 명칭 불일치"})
             
             # 2. 학점 일치 여부 점검 (학교지정 vs 학년선택 구분)
-            if not pd.isna(op_credit):
+            if not pd.isna(op_credit) and op_credit > 0:
                 is_elective = "선택" in str(row[0])
                 sem_sum = 0
                 sem_credits = []
@@ -75,10 +75,9 @@ def analyze_curriculum_data(df, is_science_track=False, is_combined_sheet=False)
                     if credit > 0: sem_credits.append(credit)
                 
                 if is_elective:
-                    # 학년 선택: 운영학점이 배당학점의 배수인지 확인
+                    # 학년 선택: 배당학점(예: 12(택4)의 12)이 운영학점(예: 3)의 배수인지 확인
                     if sem_credits:
-                        # 모든 배당학점에 대해 운영학점이 배수인지 체크
-                        if not all(op_credit % sc == 0 for sc in sem_credits):
+                        if not all(sc % op_credit == 0 for sc in sem_credits):
                             invalid_subjects.append({
                                 "과목명": name, 
                                 "행번호": idx+1, 
@@ -156,7 +155,7 @@ def check_file_and_sheets(file):
     return xls, sheet_names, is_science_school, combined, science, general
 
 # --- Streamlit UI ---
-st.title("📚 고등학교 교육과정 편성 자율 점검 시스템 (v2.8)")
+st.title("📚 고등학교 교육과정 편성 자율 점검 시스템 (v2.8.1)")
 
 if 'uploader_key' not in st.session_state:
     st.session_state.uploader_key = 0
