@@ -151,9 +151,10 @@ def check_file_and_sheets(file):
     return xls, sheet_names, is_science_school, combined, science, general
 
 # --- Streamlit UI ---
-st.title("📚 고등학교 교육과정 편성 자율 점검 시스템 (v2.9) by mhlee")
-st.text("2022 개정 교육과정 기반으로 제작(2026.7.19.)되었으며, 2027학년도 교육과정 편제 검토용입니다.")
-st.text("업데이트는 없을 예정이며, 어디까지나 임시 체크용으로만 사용하시기 바랍니다.")
+st.title("📚 고등학교 교육과정 편성 자율 점검 시스템 (v2.9)")
+with st.container(border=True):
+    st.text("2022 개정 교육과정 기반으로 제작(2026.7.19., by lmh)되었으며, 2027학년도 교육과정 편제 검토용입니다.")
+    st.text("업데이트는 없을 예정이며, 어디까지나 임시 체크용으로만 사용하시기 바랍니다.")
 
 if 'uploader_key' not in st.session_state:
     st.session_state.uploader_key = 0
