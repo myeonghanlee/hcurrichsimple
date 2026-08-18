@@ -154,7 +154,7 @@ def check_file_and_sheets(file):
 st.title("📚 고등학교 교육과정 편성 자율 점검 시스템 (v2.9)")
 
 st.markdown(
-    '<p style="margin-bottom: 0px;">2022 개정 교육과정 기반으로 제작(2026.7.19., by lmh)되었으며, 2027학년도 교육과정 편제 검토용입니다.</p>'
+    '<p style="margin-bottom: 0px;">2022 개정 교육과정 기반으로 제작(2026.8.13., by lmh)되었으며, 2027학년도 교육과정 편제 검토용입니다.</p>'
     '<p style="margin-bottom: 0px;">업데이트는 없을 예정이며, 어디까지나 임시 체크용으로만 사용하시기 바랍니다.</p>', 
     unsafe_allow_html=True
 )
