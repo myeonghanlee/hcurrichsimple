@@ -135,9 +135,25 @@ def check_file_and_sheets(file):
     return xls, sheet_names, is_science_school, combined, science, general
 
 # --- Streamlit UI ---
-st.title("📚 고등학교 교육과정 편성 자율 점검 시스템 (v2.6.1)")
+st.title("📚 고등학교 교육과정 편성 자율 점검 시스템 (v2.7)")
+
+# 초기화 세션 상태 관리
+if 'uploader_key' not in st.session_state:
+    st.session_state.uploader_key = 0
+
 st.sidebar.header("📁 교육과정 파일 업로드")
-uploaded_files = st.sidebar.file_uploader("3개년도 엑셀 파일을 업로드하세요.", type=["xlsx"], accept_multiple_files=True)
+
+# 일괄 초기화 버튼
+if st.sidebar.button("🧹 파일 일괄 초기화"):
+    st.session_state.uploader_key += 1
+    st.rerun()
+
+uploaded_files = st.sidebar.file_uploader(
+    "3개년도 엑셀 파일을 업로드하세요.", 
+    type=["xlsx"], 
+    accept_multiple_files=True,
+    key=f"uploader_{st.session_state.uploader_key}"
+)
 
 if uploaded_files:
     schools = {}
@@ -213,8 +229,6 @@ if uploaded_files:
                     ksy_c = g_max.get('국어', 0) + g_max.get('수학', 0) + g_max.get('영어', 0)
                     ksy_ratio = (ksy_c / 174) * 100 if total_c > 0 else 0
                     year_ok = str(f_data['year']) in s_name
-                    
-                    # KeyError 해결: invalid_subs에서 직접 체크
                     credit_consistency = not any("학점 불일치" in sub['사유'] for sub in invalid_subs)
                     
                     results = [
