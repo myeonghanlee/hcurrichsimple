@@ -159,7 +159,7 @@ st.markdown(
     unsafe_allow_html=True
 )
 st.markdown(
-    '<p style="margin-bottom: 1px; color: #1E88E5; font-weight: bold;">점검 필요 과목 관련: 고시 명칭 불일치 발생은 '보통교과 <표 1>' 이외의 과목일 경우 나옵니다.</p>'
+    '<p style="margin-bottom: 1px; color: #1E88E5; font-weight: bold;">점검 필요 과목 관련: 고시 명칭 불일치 발생은 보통교과 <표 1> 이외의 과목일 경우 나옵니다.</p>'
     '<p style="margin-bottom: 0px; color: #1E88E5; font-weight: bold;">학점 합계 불일치는 선택 과목에 대한 운영 및 이수 학점 확인이 어려워 발생하는 것입니다.</p>', 
     unsafe_allow_html=True
 )
