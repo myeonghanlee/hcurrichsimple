@@ -158,6 +158,11 @@ st.markdown(
     '<p style="margin-bottom: 0px;">업데이트는 없을 예정이며, 어디까지나 임시 체크용으로만 사용하시기 바랍니다.</p>', 
     unsafe_allow_html=True
 )
+st.markdown(
+    '<p style="margin-bottom: 0px;">점검 필요 과목 관련: 고시 명칭 불일치 발생은 보통교과 <표 1> 이외의 과목일 경우 나옵니다.</p>'
+    '<p style="margin-bottom: 0px;">학점 합계 불일치는 선택 과목에 대한 운영 및 이수 학점 확인이 어려워 발생하는 것입니다.</p>', 
+    unsafe_allow_html=True
+)
 
 if 'uploader_key' not in st.session_state:
     st.session_state.uploader_key = 0
